@@ -1,0 +1,2 @@
+"NSLocalNetworkUsageDescription" = "Typeflux 需要连接你选择的局域网服务。";
+"NSMicrophoneUsageDescription" = "开始录音时，Typeflux 使用麦克风将你的语音转换为文字。";

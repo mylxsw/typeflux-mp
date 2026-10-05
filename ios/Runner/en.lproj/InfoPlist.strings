@@ -1,0 +1,2 @@
+"NSLocalNetworkUsageDescription" = "Typeflux connects to the service you choose on your local network.";
+"NSMicrophoneUsageDescription" = "Typeflux uses the microphone to transcribe your speech when you start recording.";

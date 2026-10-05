@@ -1,0 +1,12 @@
+# Copy to Makefile.local for machine-specific overrides. This file has no secrets.
+# All variables can also be provided on the make command line.
+# FLUTTER = /path/to/flutter/bin/flutter
+# TYPEFLUX_TOOLS = /path/to/workspace/.tools
+# ENV = dev
+# PLATFORM = ios
+# DEVICE = <device-id-from-make-devices>
+# API_URL = https://your-development-server.example
+# PREVIEW_FONT = /path/to/chinese-font.ttf
+# PYTHON = python
+# export JAVA_HOME = /path/to/jdk-21
+# export ANDROID_HOME = /path/to/android-sdk
