@@ -17,9 +17,9 @@ TOOL = $(PYTHON) scripts/flutter_tool.py
 APP = $(TOOL) --environment "$(ENV)" --platform "$(PLATFORM)" --device "$(DEVICE)"
 
 .DEFAULT_GOAL := help
-.PHONY: help config run local dev dev-nas prod android ios windows deps doctor devices emulators emulator analyze test coverage format format-check tool-test check screenshots build apk apk-debug apk-release apk-verify ios-build windows-build clean
+.PHONY: help config run local dev dev-nas dev-macbook dev-macmini prod android ios windows deps doctor devices emulators emulator analyze test coverage format format-check tool-test check screenshots build apk apk-debug apk-release apk-verify ios-build windows-build clean
 
-help: ## List commands (ENV=local|dev|dev-nas|prod, PLATFORM=auto|android|ios|windows)
+help: ## List commands (ENV=local|dev|dev-nas|dev-macbook|dev-macmini|prod, PLATFORM=auto|android|ios|windows)
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_0-9-]+:.*## / {printf "%-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 config: ## Show resolved tools, API and launch command without starting the app
@@ -36,6 +36,12 @@ dev: ## Start against the shared HTTPS development API
 
 dev-nas: ## Start against the NAS API on the local network
 	$(MAKE) run ENV=dev-nas
+
+dev-macbook: ## Start against the MacBook API on the local network
+	$(MAKE) run ENV=dev-macbook
+
+dev-macmini: ## Start against the Mac mini API on the local network
+	$(MAKE) run ENV=dev-macmini
 
 prod: ## Start against the production API
 	$(MAKE) run ENV=prod

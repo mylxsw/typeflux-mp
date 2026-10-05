@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:record/record.dart';
 
 import '../core/api.dart';
+import 'realtime_endpoint.dart';
 import 'transcript.dart';
 
 enum VoicePhase { idle, starting, recording, finishing, failed }
@@ -56,22 +57,9 @@ class VoiceController extends ChangeNotifier {
       if (origins.isEmpty) throw const ApiError('ASR_UNAVAILABLE');
       WebSocket? socket;
       for (final origin in origins) {
-        final uri = Uri.parse(origin);
-        if (uri.scheme != 'https' ||
-            uri.userInfo.isNotEmpty ||
-            uri.hasQuery ||
-            uri.hasFragment) {
-          continue;
-        }
         try {
           socket = await WebSocket.connect(
-            uri
-                .replace(
-                  scheme: 'wss',
-                  path:
-                      '${uri.path.replaceAll(RegExp(r'/$'), '')}/api/v1/asr/ws/default',
-                )
-                .toString(),
+            realtimeWebSocketUri(origin).toString(),
             headers: {'Authorization': 'Bearer ${ticket['token']}'},
           ).timeout(const Duration(seconds: 12));
           break;

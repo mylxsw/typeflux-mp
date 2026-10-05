@@ -18,8 +18,11 @@ ROOT = Path(__file__).resolve().parents[1]
 PRESETS = {
     "dev": "https://typeflux-api.dev.fallout.in",
     "dev-nas": "http://nas-server.local:8080",
+    "dev-macbook": "http://mac-pro.local:8080",
+    "dev-macmini": "http://mac-mini.local:8080",
     "prod": "https://api.typeflux.app",
 }
+LOCAL_HTTP_ENVIRONMENTS = ("local", "dev-nas", "dev-macbook", "dev-macmini")
 
 
 def tool_environment(environ, root=ROOT):
@@ -84,8 +87,8 @@ def api_configuration(environment, platform, override, debug):
             or any(c.isspace() for c in origin) or (port is not None and port == 0)):
         raise ValueError("API_URL must be an HTTP(S) origin without credentials, path, query or fragment.")
     insecure = url.scheme == "http"
-    if insecure and not (debug and environment in ("local", "dev-nas") and local_host(url.hostname)):
-        raise ValueError("HTTP requires ENV=local or dev-nas, debug mode and a local-network address. Use HTTPS otherwise.")
+    if insecure and not (debug and environment in LOCAL_HTTP_ENVIRONMENTS and local_host(url.hostname)):
+        raise ValueError("HTTP requires ENV=local, dev-nas, dev-macbook or dev-macmini, debug mode and a local-network address. Use HTTPS otherwise.")
     return origin.rstrip("/"), insecure
 
 
@@ -94,10 +97,30 @@ def select_device(devices, platform):
         d.get("targetPlatform", "").startswith("android") if platform == "android"
         else d.get("targetPlatform") == "ios"
     )]
-    if len(candidates) != 1:
-        raise ValueError(f"Expected one connected {platform} device, found {len(candidates)}. "
-                         "Run make devices; set DEVICE=<id>. Start a simulator with make emulators/emulator.")
-    return candidates[0]["id"]
+    if not candidates:
+        raise ValueError(f"No connected {platform} devices found. "
+                         "Connect a device or start a simulator with make emulators/emulator.")
+    if len(candidates) == 1:
+        return candidates[0]["id"]
+
+    print(f"Available {platform} devices:", flush=True)
+    for number, device in enumerate(candidates, start=1):
+        kind = ("simulator" if platform == "ios" else "emulator") if device.get("emulator") else "physical device"
+        print(f"  [{number}] {device.get('name') or device['id']} ({kind}) — {device['id']}", flush=True)
+    if not sys.stdin.isatty():
+        raise ValueError("Multiple devices found without an interactive terminal. "
+                         "Set DEVICE=<id> using one of the devices listed above.")
+
+    while True:
+        try:
+            choice = input(f"Select a device [1-{len(candidates)}] (q to cancel): ").strip()
+        except EOFError:
+            raise ValueError("Device selection cancelled.") from None
+        if choice.lower() == "q":
+            raise ValueError("Device selection cancelled.")
+        if choice.isascii() and choice.isdecimal() and 1 <= int(choice) <= len(candidates):
+            return candidates[int(choice) - 1]["id"]
+        print(f"Enter a number from 1 to {len(candidates)}, or q to cancel.", flush=True)
 
 
 def prepare_command(options, args, flutter, env):
@@ -176,7 +199,7 @@ def verify_apk(path, env):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--environment", choices=("local", "dev", "dev-nas", "prod"), default="dev")
+    parser.add_argument("--environment", choices=("local", *PRESETS), default="dev")
     parser.add_argument("--platform", choices=("auto", "android", "ios", "windows"), default="auto")
     parser.add_argument("--device", default="")
     parser.add_argument("--dry-run", action="store_true")
@@ -209,6 +232,9 @@ def main():
         if origin:
             print(f"Typeflux {options.environment}: {origin}", flush=True)
         return subprocess.call(command, cwd=ROOT, env=env)
+    except KeyboardInterrupt:
+        print("\nDevice selection or launch interrupted.", file=sys.stderr)
+        return 130
     except (ValueError, OSError, subprocess.CalledProcessError, zipfile.BadZipFile) as error:
         print(f"Typeflux tooling: {error}", file=sys.stderr)
         return 1

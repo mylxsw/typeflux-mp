@@ -7,6 +7,8 @@ import io
 import json
 import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -36,6 +38,8 @@ class ApiRoutingTests(unittest.TestCase):
         for environment, expected in (
             ("dev", "https://typeflux-api.dev.fallout.in"),
             ("dev-nas", "http://nas-server.local:8080"),
+            ("dev-macbook", "http://mac-pro.local:8080"),
+            ("dev-macmini", "http://mac-mini.local:8080"),
             ("prod", "https://api.typeflux.app"),
         ):
             with self.subTest(environment=environment):
@@ -43,7 +47,7 @@ class ApiRoutingTests(unittest.TestCase):
                     environment, "android", None, debug=True
                 )
                 self.assertEqual(origin, expected)
-                self.assertEqual(insecure, environment == "dev-nas")
+                self.assertEqual(insecure, environment in tool.LOCAL_HTTP_ENVIRONMENTS)
 
     def test_local_android_uses_host_alias_and_other_platforms_loopback(self):
         for platform, host in (
@@ -58,7 +62,7 @@ class ApiRoutingTests(unittest.TestCase):
                 )
 
     def test_explicit_https_origin_overrides_any_environment(self):
-        for environment in ("local", "dev", "dev-nas", "prod"):
+        for environment in ("local", *tool.PRESETS):
             with self.subTest(environment=environment):
                 self.assertEqual(
                     tool.api_configuration(
@@ -73,7 +77,7 @@ class ApiRoutingTests(unittest.TestCase):
             "172.31.255.254", "192.168.10.2", "169.254.1.2",
             "nas-server.local", "[::1]", "[fe80::1]", "[fd00::1]",
         ):
-            for environment in ("local", "dev-nas"):
+            for environment in tool.LOCAL_HTTP_ENVIRONMENTS:
                 with self.subTest(host=host, environment=environment):
                     self.assertEqual(
                         tool.api_configuration(environment, "android", f"http://{host}:8080", True),
@@ -92,9 +96,10 @@ class ApiRoutingTests(unittest.TestCase):
             "172.32.0.1", "192.0.2.1", "198.18.0.1", "100.64.0.1",
             "0.0.0.0", "[2001:4860:4860::8888]", "[::]",
         ):
-            with self.subTest(host=host):
-                with self.assertRaises(ValueError):
-                    tool.api_configuration("local", "android", f"http://{host}:8080", True)
+            for environment in tool.LOCAL_HTTP_ENVIRONMENTS:
+                with self.subTest(host=host, environment=environment):
+                    with self.assertRaises(ValueError):
+                        tool.api_configuration(environment, "android", f"http://{host}:8080", True)
 
     def test_origin_rejects_credentials_paths_queries_fragments_and_bad_ports(self):
         for origin in (
@@ -106,6 +111,26 @@ class ApiRoutingTests(unittest.TestCase):
             with self.subTest(origin=origin):
                 with self.assertRaises(ValueError):
                     tool.api_configuration("prod", "android", origin, True)
+
+
+class MakeTargetTests(unittest.TestCase):
+    def test_mac_targets_forward_platform_and_device_to_launcher(self):
+        with tempfile.TemporaryDirectory(prefix="typeflux-make-") as temporary:
+            workspace = Path(temporary)
+            (workspace / "Makefile").write_text((SCRIPT.parents[1] / "Makefile").read_text())
+            recorder = workspace / "recorder.py"
+            recorder.write_text('import json, sys\nprint(json.dumps(sys.argv[1:]))\n')
+            for target in ("dev-macbook", "dev-macmini"):
+                with self.subTest(target=target):
+                    output = subprocess.check_output(
+                        ["make", "--no-print-directory", target, "PLATFORM=ios", "DEVICE=fixture-device",
+                         f'TOOL="{sys.executable}" "{recorder}"'],
+                        cwd=workspace, text=True,
+                    )
+                    self.assertEqual(json.loads(output.splitlines()[-1]), [
+                        "--environment", target, "--platform", "ios", "--device", "fixture-device",
+                        "run", "--debug",
+                    ])
 
 
 class ToolEnvironmentTests(unittest.TestCase):
@@ -170,11 +195,64 @@ class DeviceAndCommandTests(unittest.TestCase):
         self.assertEqual(tool.select_device(self.devices, "android"), "emulator-5554")
         self.assertEqual(tool.select_device(self.devices, "ios"), "ios-simulator")
 
-    def test_zero_and_multiple_devices_require_explicit_selection(self):
-        for devices, count in (([], 0), ([self.devices[0], {"id": "phone", "targetPlatform": "android-arm64"}], 2)):
-            with self.subTest(count=count):
-                with self.assertRaisesRegex(ValueError, f"found {count}"):
-                    tool.select_device(devices, "android")
+    def test_no_devices_explains_how_to_connect_one_without_prompting(self):
+        with patch("builtins.input") as prompt:
+            with self.assertRaisesRegex(ValueError, "No connected android devices"):
+                tool.select_device([], "android")
+        prompt.assert_not_called()
+
+    def test_multiple_devices_are_listed_and_selection_continues_launch(self):
+        devices = [*self.devices,
+                   {"id": "ios-phone", "name": "My iPhone", "targetPlatform": "ios", "emulator": False}]
+        devices[1] = dict(devices[1], name="iPhone Simulator", emulator=True)
+        output = io.StringIO()
+        with patch.object(tool.subprocess, "check_output", return_value=json.dumps(devices)), \
+                patch.object(tool.sys.stdin, "isatty", return_value=True), \
+                patch("builtins.input", return_value="2") as prompt, redirect_stdout(output):
+            command, origin = tool.prepare_command(
+                options(platform="ios", environment="dev-macbook"), ["run", "--debug"], "/sdk/flutter", {},
+            )
+        prompt.assert_called_once()
+        self.assertEqual(command[-2:], ["-d", "ios-phone"])
+        self.assertEqual(origin, "http://mac-pro.local:8080")
+        self.assertIn("[1] iPhone Simulator (simulator)", output.getvalue())
+        self.assertIn("[2] My iPhone (physical device)", output.getvalue())
+        self.assertNotIn("emulator-5554", output.getvalue())
+        self.assertNotIn("unsupported", output.getvalue())
+        self.assertNotIn("chrome", output.getvalue())
+
+    def test_invalid_device_input_prompts_again(self):
+        devices = [self.devices[0], {"id": "phone", "targetPlatform": "android-arm64"}]
+        with patch.object(tool.sys.stdin, "isatty", return_value=True), \
+                patch("builtins.input", side_effect=["", "text", "0", "3", " 2 "]) as prompt, \
+                redirect_stdout(io.StringIO()):
+            self.assertEqual(tool.select_device(devices, "android"), "phone")
+        self.assertEqual(prompt.call_count, 5)
+
+    def test_noninteractive_multiple_devices_lists_ids_without_reading_input(self):
+        devices = [self.devices[0], {"id": "phone", "targetPlatform": "android-arm64"}]
+        output = io.StringIO()
+        with patch.object(tool.sys.stdin, "isatty", return_value=False), \
+                patch("builtins.input") as prompt, redirect_stdout(output):
+            with self.assertRaisesRegex(ValueError, "Set DEVICE=<id>"):
+                tool.select_device(devices, "android")
+        prompt.assert_not_called()
+        self.assertIn("emulator-5554", output.getvalue())
+        self.assertIn("phone", output.getvalue())
+
+    def test_cancelled_selection_never_launches_flutter(self):
+        devices = [self.devices[0], {"id": "phone", "targetPlatform": "android-arm64"}]
+        for response in ("q", "Q", EOFError(), KeyboardInterrupt()):
+            with self.subTest(response=response), \
+                    patch.object(tool.sys, "argv", [str(SCRIPT), "--platform", "android", "run", "--debug"]), \
+                    patch.object(tool, "tool_environment", return_value=("/sdk/flutter", {})), \
+                    patch.object(tool.subprocess, "check_output", return_value=json.dumps(devices)), \
+                    patch.object(tool.sys.stdin, "isatty", return_value=True), \
+                    patch("builtins.input", side_effect=[response]), \
+                    patch.object(tool.subprocess, "call") as launch, \
+                    redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                self.assertEqual(tool.main(), 130 if isinstance(response, KeyboardInterrupt) else 1)
+                launch.assert_not_called()
 
     def test_android_run_queries_devices_without_shell_and_adds_selected_id(self):
         env = {"PATH": "/tools with spaces"}
@@ -224,11 +302,33 @@ class DeviceAndCommandTests(unittest.TestCase):
                     tool.prepare_command(options(), ["build", "apk", *mode_args], "/sdk/flutter", {})
 
     def test_profile_and_release_local_http_cannot_silently_build(self):
-        for environment in ("local", "dev-nas"):
+        for environment in tool.LOCAL_HTTP_ENVIRONMENTS:
             for mode in ("profile", "release"):
                 with self.subTest(environment=environment, mode=mode):
                     with self.assertRaisesRegex(ValueError, "HTTP requires"):
                         tool.prepare_command(options(environment=environment), ["build", "apk", f"--{mode}"], "/sdk/flutter", {})
+
+    def test_mac_environments_support_auto_and_explicit_platforms(self):
+        for environment, host in (("dev-macbook", "mac-pro.local"), ("dev-macmini", "mac-mini.local")):
+            for platform in ("auto", "android", "ios", "windows"):
+                with self.subTest(environment=environment, platform=platform):
+                    command, origin = tool.prepare_command(
+                        options(environment=environment, platform=platform, dry_run=True),
+                        ["run", "--debug"], "/sdk/flutter", {},
+                    )
+                    self.assertEqual(origin, f"http://{host}:8080")
+                    self.assertIn(f"--dart-define=TYPEFLUX_API_URL={origin}", command)
+                    self.assertIn("--dart-define=TYPEFLUX_ALLOW_INSECURE_HTTP=true", command)
+
+    def test_mac_environment_presets_allow_lan_ip_overrides(self):
+        for environment in ("dev-macbook", "dev-macmini"):
+            with self.subTest(environment=environment):
+                command, origin = tool.prepare_command(
+                    options(environment=environment), ["run", "--debug"], "/sdk/flutter",
+                    {"API_URL": "http://192.168.1.2:8080"},
+                )
+                self.assertEqual(origin, "http://192.168.1.2:8080")
+                self.assertIn("--dart-define=TYPEFLUX_ALLOW_INSECURE_HTTP=true", command)
 
     def test_extra_flags_cannot_replace_environment_defines(self):
         for extra in ("--dart-define=TYPEFLUX_API_URL=https://other.example", "--dart-define=TYPEFLUX_ALLOW_INSECURE_HTTP=true", "--dart-define-from-file=local.json"):

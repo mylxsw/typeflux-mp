@@ -53,7 +53,7 @@ source, not a released app or full macOS feature parity.
 Use Flutter **3.47.2 / Dart 3.13.2** (the SDK used for this increment).
 
 The Makefile is the entry point for development, following the existing macOS
-client's `local`, `dev`, `dev-nas` and `prod` names:
+client's environment names:
 
 ```sh
 make help
@@ -63,6 +63,9 @@ make android ENV=dev            # connected Android device / running emulator
 make windows ENV=dev            # Windows host
 make local PLATFORM=android    # local API through Android emulator's 10.0.2.2
 make dev-nas PLATFORM=ios       # NAS API through nas-server.local
+make dev-macbook PLATFORM=ios   # MacBook API through mac-pro.local:8080
+make dev-macmini PLATFORM=android # Mac mini API through mac-mini.local:8080
+make config ENV=dev-macmini     # inspect API and launch arguments without starting
 make prod DEVICE=<device-id>    # production API
 ```
 
