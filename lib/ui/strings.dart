@@ -419,7 +419,7 @@ const _strings = <String, List<String>>{
     '快捷键被其他程序占用，请关闭冲突快捷键后重试。',
     'The shortcut is unavailable. Check other applications and retry.',
   ],
-  'ask': ['随便问', 'Ask anything'],
+  'ask': ['对话', 'Chat'],
   'welcome': ['想聊些什么？', 'What is on your mind?'],
   'subtitle': ['提个问题，或者接着上次聊。', 'Ask a question or pick up a conversation.'],
   'login': ['登录', 'Sign in'],
