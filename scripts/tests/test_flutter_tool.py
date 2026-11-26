@@ -206,7 +206,8 @@ class DeviceAndCommandTests(unittest.TestCase):
                    {"id": "ios-phone", "name": "My iPhone", "targetPlatform": "ios", "emulator": False}]
         devices[1] = dict(devices[1], name="iPhone Simulator", emulator=True)
         output = io.StringIO()
-        with patch.object(tool.subprocess, "check_output", return_value=json.dumps(devices)), \
+        with patch.object(tool.sys, "platform", "darwin"), \
+                patch.object(tool.subprocess, "check_output", return_value=json.dumps(devices)), \
                 patch.object(tool.sys.stdin, "isatty", return_value=True), \
                 patch("builtins.input", return_value="2") as prompt, redirect_stdout(output):
             command, origin = tool.prepare_command(
